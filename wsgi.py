@@ -42,10 +42,10 @@ class Request(object):
     def __init__(self, environ):
         self.environ = environ
         headers = self.headers
-        self.path = headers['PATH_INFO']
-        self.method = headers['REQUEST_METHOD']
-        self.length = headers['CONTENT_LENGTH']
         self.content_type = headers.get('CONTENT_TYPE', '')
+        self.length = headers['CONTENT_LENGTH']
+        self.method = headers['REQUEST_METHOD']
+        self.path = headers['PATH_INFO']
 
     @lazy_property
     def query(self):
@@ -60,8 +60,10 @@ class Request(object):
     @lazy_property
     def headers(self):
         environ = self.environ
+        length = int(environ.get('CONTENT_LENGTH') or 0)
+
         headers = {
-            'CONTENT_LENGTH': int(environ.get('CONTENT_LENGTH') or 0),
+            'CONTENT_LENGTH': length,
         }
         headers.update(
             (k, v)
@@ -73,13 +75,10 @@ class Request(object):
 
     @lazy_property
     def data(self):
-        headers = self.headers
-        length = self.length
-        content_type = self.content_type.lower()
-
         environ = self.environ
         wsgi_input = environ['wsgi.input']
 
+        content_type = self.content_type.lower()
         if 'form' in content_type:
             env_data = FieldStorage(wsgi_input, environ=environ)
             return {
@@ -88,7 +87,7 @@ class Request(object):
                 if not isinstance(k, MiniFieldStorage)
             }
         else:
-            return wsgi_input.read(length)
+            return wsgi_input.read(self.length)
 
 
 class Response(object):
@@ -97,10 +96,10 @@ class Response(object):
         self.make_response = make_response
 
         # view can return str or str and a dict of headers
-        self.data, headers = (data[0], data[1]) \
+        self.data, _headers = (data[0], data[1]) \
             if isinstance(data, tuple) else (data, {})
 
-        headers = {k: v for k, v in iteritems(headers)}
+        headers = {k: v for k, v in iteritems(_headers)}
         for k in headers:
             if 'content-type' in k.lower():
                 break
@@ -111,10 +110,10 @@ class Response(object):
 
     def render(self):
         code = self.code
-        headers = iteritems(self.headers)
-
         resp_code = '{} {}'.format(code, httplib.responses[code])
-        self.make_response(resp_code, list(headers))
+
+        headers = list(iteritems(self.headers))
+        self.make_response(resp_code, headers)
 
         if resp_code[0] in {'4', '5'}:
             data = resp_code.encode('utf-8')
