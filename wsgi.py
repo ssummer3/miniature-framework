@@ -43,6 +43,8 @@ class Request(object):
         self.environ = environ
         self.path = self.headers['PATH_INFO']
         self.method = self.headers['REQUEST_METHOD']
+        self.length = self.headers['CONTENT_LENGTH']
+        self.content_type = headers.get('CONTENT_TYPE', '')
 
     @lazy_property
     def query(self):
@@ -70,8 +72,8 @@ class Request(object):
     @lazy_property
     def data(self):
         headers = self.headers
-        length = headers['CONTENT_LENGTH']
-        content_type = headers.get('CONTENT_TYPE', '').lower()
+        length = self.length
+        content_type = self.content_type.lower()
 
         environ = self.environ
         wsgi_input = environ['wsgi.input']
@@ -144,11 +146,11 @@ class App(object):
         return decorate
 
     def path_dispatch(self, request, make_response):
-        path = request.headers['PATH_INFO']
+        path = request.path
         view = self.routes.get(path)
 
         if view:
-            method = request.headers['REQUEST_METHOD']
+            method = request.method
             methods = set(view['methods'])
             if method in methods:
                 data = view['func'](request)
