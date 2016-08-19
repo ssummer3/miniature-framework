@@ -1,4 +1,5 @@
-# wsgi.py                                                                                                                       [130/1885]
+# wsgi.py
+
 
 from cgi import FieldStorage, MiniFieldStorage
 from collections import defaultdict
