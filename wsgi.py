@@ -1,94 +1,126 @@
-import cgi
-from functools import wraps
+# wsgi.py                                                                                                                       [130/1885]
+
+from cgi import FieldStorage, MiniFieldStorage
+from collections import defaultdict
+from functools import update_wrapper, wraps
 from wsgiref.simple_server import make_server
+
 try:
+    iteritems = dict.iteritems
     import httplib
-except ImportError:
-    import http.client as httplib  # py3
+    from urlparse import parse_qsl
+except (ImportError, AttributeError):  # py3
+    iteritmes = dict.items
+    import http.client as httplib
+    from urllib.parse import parse_qsl
+
+
+wanted_headers = {
+    'REQUEST_METHOD', 'PATH_INFO', 'REMOTE_ADDR', 'REMOTE_HOST', 'CONTENT_TYPE'
+}
+
+
+class lazy_property(object):
+    """
+    From https://github.com/faif/python-patterns/blob/master/lazy_evaluation.py
+    """
+
+    def __init__(self, function):
+        self.function = function
+        update_wrapper(self, function)
+
+    def __get__(self, obj, type_):
+        if obj is None:
+            return self
+        val = self.function(obj)
+        obj.__dict__[self.function.__name__] = val
+        return val
 
 
 class Request(object):
-    """
-    Initiates a request object given the environ from the server
-    """
 
     def __init__(self, environ):
         self.environ = environ
-        self.headers = self._parse_headers(environ)
-        self.query = self._parse_query(environ)
-        self.data = self._parse_data(environ)
+        self.path = self.headers['PATH_INFO']
+        self.method = self.headers['REQUEST_METHOD']
 
-    def _parse_query(self, environ):
-        query = cgi.parse_qs(environ['QUERY_STRING'])
-        return {k: v[0] for k, v in query.items()}
+    @lazy_property
+    def query(self):
+        query = self.environ.get('QUERY_STRING')
+        parsed_query = parse_qsl(query)
+        qs = defaultdict(list)
+        for k, v in parsed_query:
+            qs[k].append(v)
+        return dict(qs)
 
-    def _parse_headers(self, environ):
-        length = environ.get('CONTENT_LENGTH', 0)
-        headers = {'CONTENT_LENGTH': 0 if not length else int(length)}
-
-        wanted_headers = ['REQUEST_METHOD', 'PATH_INFO', 'REMOTE_ADDR',
-                          'REMOTE_HOST', 'CONTENT_TYPE']
-
-        for k, v in environ.items():
-            if k in wanted_headers or k.startswith('HTTP'):
-                headers[k] = v
+    @lazy_property
+    def headers(self):
+        environ = self.environ
+        headers = {
+            'CONTENT_LENGTH': int(environ.get('CONTENT_LENGTH') or 0),
+        }
+        headers.update(
+            (k, v)
+            for k, v
+            in iteritems(environ)
+            if k in wanted_headers or k.startswith('HTTP_')
+        )
         return headers
 
-    def _parse_data(self, environ):
-        content_type = environ['CONTENT_TYPE'].lower()
-        data = {}
+    @lazy_property
+    def data(self):
+        headers = self.headers
+        length = headers['CONTENT_LENGTH']
+        content_type = headers.get('CONTENT_TYPE', '').lower()
+
+        environ = self.environ
+        wsgi_input = environ['wsgi.input']
+
         if 'form' in content_type:
-            env_data = cgi.FieldStorage(environ['wsgi.input'],
-                                        environ=environ)
-            for k in env_data.list:
-                # filter out url queries
-                if not isinstance(k, cgi.MiniFieldStorage):
-                    if k.filename:
-                        data[k.name] = k.file
-                    else:
-                        data[k.name] = k.value
-            return data
+            env_data = FieldStorage(wsgi_input, environ=environ)
+            return {
+                k.name: k.file if k.filename else k.value
+                for k in env_data.list
+                if not isinstance(k, MiniFieldStorage)
+            }
         else:
-            length = self.headers['CONTENT_LENGTH']
-            return environ['wsgi.input'].read(length)
+            return wsgi_input.read(length)
 
 
 class Response(object):
-    """
-    Response object is responsable for initiating the make_response and returning the view data
-    :params code, the status code
-    :params data, the raw data rendered from the view
-
-    """
     def __init__(self, make_response, code=200, data=''):
-        # view can return str or str and a dict of headers
-        if isinstance(data, tuple):
-            self.data = data[0]
-            headers = data[1]
-        else:
-            self.data = data
-            headers = {}
-
-        if 'content-type' not in map(lambda x: x.lower(), headers):
-            headers['Content-Type'] = 'text/html'
-
-        self.headers = [(k, v) for k, v in headers.items()]
         self.code = code
         self.make_response = make_response
 
+        # view can return str or str and a dict of headers
+        self.data, headers = (data[0], data[1]) \
+            if isinstance(data, tuple) else (data, {})
+
+        headers = {k: v for k, v in iteritems(headers)}
+        for k in headers:
+            if 'content-type' in k.lower():
+                break
+        else:
+            headers['Content-Type'] = 'text/html'
+
+        self.headers = headers
+
     def render(self):
-        resp_code = '{} {}'.format(self.code, httplib.responses[self.code])
+        code = self.code
+        headers = iteritems(self.headers)
 
-        if str(self.code)[0] in ['4', '5']:
-            self.make_response(resp_code, self.headers)
-            yield resp_code.encode('utf-8')
+        resp_code = '{} {}'.format(code, httplib.responses[code])
+        self.make_response(resp_code, list(headers))
 
-        try:
-            data = bytes(self.data)
-        except Exception:
-            data = str(self.data).encode('utf-8')
+        if resp_code[0] in {'4', '5'}:
+            data = resp_code.encode('utf-8')
+        else:
+            _data = self.data
+            try:
+                data = bytes(_data)
+            except Exception:
+                data = str(_data).encode('utf-8')
 
-        self.make_response(resp_code, self.headers)
         yield data
 
 
@@ -98,6 +130,7 @@ class App(object):
         self.routes = {}
 
     def route(self, url, methods=['GET']):
+        routes = self.routes
 
         def decorate(f):
 
@@ -105,38 +138,34 @@ class App(object):
             def wrapper(*args, **kwargs):
                 return f(*args, **kwargs)
 
-            self.routes[url] = {'methods': methods, 'func': wrapper}
-
+            routes[url] = {'methods': methods, 'func': wrapper}
             return wrapper
+
         return decorate
 
     def path_dispatch(self, request, make_response):
         path = request.headers['PATH_INFO']
-        method = request.headers['REQUEST_METHOD']
         view = self.routes.get(path)
-        if not view:
-            response = Response(make_response, 404)
-        elif method not in view['methods']:
-            response = Response(make_response, 405)
+
+        if view:
+            method = request.headers['REQUEST_METHOD']
+            methods = set(view['methods'])
+            if method in methods:
+                data = view['func'](request)
+                response = Response(make_response, data=data)
+            else:
+                response = Response(make_response, 405)
         else:
-            data = view['func'](request)
-            response = Response(make_response, data=data)
+            response = Response(make_response, 404)
 
-        return response
-
-    def dispatch_request(self, environ, make_response):
-        request = Request(environ)
-        response = self.path_dispatch(request, make_response)
         return response
 
     def __call__(self, environ, make_response):
-        """The actual wsgi app"""
-        resp = self.dispatch_request(environ, make_response)
-        return resp.render()
-
+        request = Request(environ)
+        response = self.path_dispatch(request, make_response)
+        return response.render()
 
     def run(self, host='', port=8080):
-        """ server """
         httpd = make_server(host, port, self)
         print('Serving on {host}:{port}'.format(host=host, port=port))
         httpd.serve_forever()
