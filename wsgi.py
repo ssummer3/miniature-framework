@@ -122,8 +122,7 @@ class Response(object):
                 data = str(_data).encode('utf-8')
 
         headers = self.headers
-        headers.append(('Content-Length', len(data)))
-
+        # headers.append['Content-Length'] = len(data)
         self.make_response(resp_code, list(iteritems(headers)))
         yield data
 
