@@ -44,7 +44,7 @@ class Request(object):
         self.path = self.headers['PATH_INFO']
         self.method = self.headers['REQUEST_METHOD']
         self.length = self.headers['CONTENT_LENGTH']
-        self.content_type = headers.get('CONTENT_TYPE', '')
+        self.content_type = self.headers.get('CONTENT_TYPE', '')
 
     @lazy_property
     def query(self):
