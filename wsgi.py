@@ -10,7 +10,7 @@ try:
     import httplib
     from urlparse import parse_qsl
 except (ImportError, AttributeError):  # py3
-    iteritmes = dict.items
+    iteritems = dict.items
     import http.client as httplib
     from urllib.parse import parse_qsl
 
