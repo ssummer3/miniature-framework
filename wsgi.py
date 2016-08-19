@@ -112,9 +112,6 @@ class Response(object):
         code = self.code
         resp_code = '{} {}'.format(code, httplib.responses[code])
 
-        headers = list(iteritems(self.headers))
-        self.make_response(resp_code, headers)
-
         if resp_code[0] in {'4', '5'}:
             data = resp_code.encode('utf-8')
         else:
@@ -124,6 +121,10 @@ class Response(object):
             except Exception:
                 data = str(_data).encode('utf-8')
 
+        headers = self.headers
+        headers.append('Content-Length', len(data))
+
+        self.make_response(resp_code, list(iteritems(headers)))
         yield data
 
 
