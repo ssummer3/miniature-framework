@@ -41,19 +41,21 @@ class Request(object):
 
     def __init__(self, environ):
         self.environ = environ
-        self.path = self.headers['PATH_INFO']
-        self.method = self.headers['REQUEST_METHOD']
-        self.length = self.headers['CONTENT_LENGTH']
-        self.content_type = self.headers.get('CONTENT_TYPE', '')
+        headers = self.headers
+        self.path = headers['PATH_INFO']
+        self.method = headers['REQUEST_METHOD']
+        self.length = headers['CONTENT_LENGTH']
+        self.content_type = headers.get('CONTENT_TYPE', '')
 
     @lazy_property
     def query(self):
         query = self.environ.get('QUERY_STRING')
-        parsed_query = parse_qsl(query)
-        qs = defaultdict(list)
-        for k, v in parsed_query:
-            qs[k].append(v)
-        return dict(qs)
+        if query:
+            parsed_query = parse_qsl(query)
+            qs = defaultdict(list)
+            for k, v in parsed_query:
+                qs[k].append(v)
+            return dict(qs)
 
     @lazy_property
     def headers(self):
